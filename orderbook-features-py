@@ -1,0 +1,63 @@
+from google.colab import drive
+import pandas as pd
+import numpy as np
+from google.colab import files
+
+drive.mount('/content/drive')
+
+uploaded = files.upload()
+file_name = list(uploaded.keys())[0]
+
+df = pd.read_csv(file_name)
+df = df.apply(pd.to_numeric, errors='ignore')
+groups = df.groupby('timestamp')
+
+def calculate_mid_price(bid_levels, ask_levels):
+    if len(bid_levels) > 0 and len(ask_levels) > 0:
+        bid_top_price = bid_levels.iloc[0]['price']
+        ask_top_price = ask_levels.iloc[0]['price']
+        mid_price = (bid_top_price + ask_top_price) / 2
+        return mid_price
+    else:
+        return np.nan
+
+def calculate_book_imbalance(bid_levels, ask_levels, level=5):
+    bid_quantity = bid_levels.head(level)['quantity'].sum()
+    ask_quantity = ask_levels.head(level)['quantity'].sum()
+    if bid_quantity + ask_quantity == 0:
+        return 0
+    imbalance = (bid_quantity - ask_quantity) / (bid_quantity + ask_quantity)
+    return imbalance
+
+def calculate_book_delta(bid_levels, ask_levels, level=5):
+    if len(bid_levels) >= level and len(ask_levels) >= level:
+        bid_delta = bid_levels.iloc[:level]['price'].diff().fillna(0).sum()
+        ask_delta = ask_levels.iloc[:level]['price'].diff().fillna(0).sum()
+        return bid_delta - ask_delta
+    return np.nan
+
+features = []
+
+for timestamp, group in groups:
+    bid_levels = group[group['type'] == 0].sort_values(by='price', ascending=False)
+    ask_levels = group[group['type'] == 1].sort_values(by='price', ascending=True)
+
+    mid_price = calculate_mid_price(bid_levels, ask_levels)
+    imbalance = calculate_book_imbalance(bid_levels, ask_levels)
+    delta_v1 = calculate_book_delta(bid_levels, ask_levels, level=1)
+    delta_v5 = calculate_book_delta(bid_levels, ask_levels, level=5)
+
+    features.append({
+        'timestamp': timestamp,
+        'mid_price': mid_price,
+        'book_imbalance': imbalance,
+        'book_delta_v1': delta_v1,
+        'book_delta_v5': delta_v5
+    })
+
+features_df = pd.DataFrame(features)
+
+output_path = '/content/drive/My Drive/calculated_features.csv'
+features_df.to_csv(output_path, index=False)
+print(f"Features saved to {output_path}")
+print(features_df.head())
