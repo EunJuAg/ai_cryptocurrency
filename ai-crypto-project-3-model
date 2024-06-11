@@ -1,0 +1,84 @@
+!apt-get install -y r-base
+
+pip install rpy2
+
+import rpy2.robjects.packages as rpackages
+from rpy2.robjects.vectors import StrVector
+
+utils = rpackages.importr('utils')
+utils.chooseCRANmirror(ind=1)  
+
+packnames = ('stringr', 'glmnet')
+
+names_to_install = [x for x in packnames if not rpackages.isinstalled(x)]
+if len(names_to_install) > 0:
+    utils.install_packages(StrVector(names_to_install))
+
+stringr = rpackages.importr('stringr')
+glmnet = rpackages.importr('glmnet')
+
+from google.colab import files
+uploaded = files.upload()
+
+for file_name in uploaded.keys():
+    print(f'Uploaded file: {file_name}')
+
+from google.colab import drive
+drive.mount('/content/drive')
+
+uploaded_file_name = list(uploaded.keys())[0]
+print(uploaded_file_name)
+
+import subprocess
+
+r_code = f"""
+library('stringr')
+library('glmnet')
+
+extract <- function(o, s) {{ 
+  index <- which(coef(o, s) != 0) 
+  data.frame(name=rownames(coef(o))[index], coef=coef(o, s)[index]) 
+}}
+
+options(scipen=999)
+
+args <- c('2024-05-01T00:00:00', '2024-05-01T23:59:00', 'upbit', 'BTC', 'mid5')
+
+filtered = paste(args[1], args[2], args[3], args[4], 'filtered-5-2', args[5], sep="-")
+model_file = paste(args[2], args[3], args[4], args[5], 'lasso-5s-2std', sep='-')
+
+filtered <- str_remove_all(filtered, ":")
+model_file <- str_remove_all(model_file, ":")
+
+filtered = paste ("./", filtered, ".csv", sep="")
+model_file = paste ("./", model_file, ".csv", sep="")
+
+filtered = read.csv("{uploaded_file_name}")
+mid_std = sd(filtered$mid_price)
+message(round(mid_std, 0))
+
+filtered_no_time_mid = subset(filtered, select=-c(mid_price, timestamp))
+
+y = filtered_no_time_mid$return
+x = subset(filtered_no_time_mid, select=-c(return))
+
+x <- as.matrix(x)
+
+cv_fit <- cv.glmnet(x=x, y=y, alpha=1, intercept=FALSE, lower.limits=0, nfolds=5)
+
+fit <- glmnet(x=x, y=y, alpha=1, lambda=cv_fit$lambda.1se, intercept=FALSE, lower.limits=0)
+df <- extract(fit, s=cv_fit$lambda.1se)
+df <- t(df)
+
+write.table(df, file=model_file, sep=",", col.names=FALSE, row.names=FALSE, quote=FALSE)
+
+drive_model_file <- file.path('/content/drive/MyDrive', model_file)
+file.copy(model_file, drive_model_file)
+
+print(paste("Model coefficients saved to:", drive_model_file))
+"""
+
+with open('script.R', 'w') as file:
+    file.write(r_code)
+
+subprocess.run(['Rscript', 'script.R'])
